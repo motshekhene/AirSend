@@ -1,54 +1,48 @@
-# airsend_modern.py
-from http.server import HTTPServer, BaseHTTPRequestHandler
+# airsend_flask.py
+from flask import Flask, request, render_template_string
 import os
 import socket
-from io import BytesIO
 import qrcode
 
 UPLOAD_FOLDER = "ReceivedFiles"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        # Serve the upload page
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        self.wfile.write(b"""
-        <html>
-        <head><title>AirSend</title></head>
-        <body style='text-align:center; font-family:sans-serif;'>
-        <h1>AirSend</h1>
-        <p>Send files from your phone to your PC over Wi-Fi</p>
-        <form enctype='multipart/form-data' method='post'>
-            <input name='file' type='file'/>
-            <input type='submit' value='Upload'/>
-        </form>
-        </body>
-        </html>
-        """)
+app = Flask(__name__)
 
-    def do_POST(self):
-        # Read raw POST data
-        content_length = int(self.headers['Content-Length'])
-        body = self.rfile.read(content_length)
+HTML_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AirSend</title>
+    <style>
+        body { font-family: sans-serif; text-align:center; margin-top:50px; }
+        input, button { padding:10px; font-size:16px; margin:10px; }
+    </style>
+</head>
+<body>
+    <h1>AirSend</h1>
+    <p>Send files from your phone to your PC over Wi-Fi</p>
+    <form method="POST" enctype="multipart/form-data">
+        <input type="file" name="file">
+        <input type="submit" value="Upload">
+    </form>
+    {% if message %}
+    <p style="color:green">{{ message }}</p>
+    {% endif %}
+</body>
+</html>
+"""
 
-        # Find the filename in the body
-        header, file_data = body.split(b"\r\n\r\n", 1)
-        filename_line = [line for line in header.split(b"\r\n") if b"filename=" in line][0]
-        filename = filename_line.split(b'filename="')[1].split(b'"')[0].decode()
-
-        # Remove the trailing boundary
-        file_content = file_data.rsplit(b"\r\n--", 1)[0]
-
-        # Save file
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        with open(filepath, 'wb') as f:
-            f.write(file_content)
-
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(f"File '{filename}' uploaded successfully!".encode())
+@app.route("/", methods=["GET", "POST"])
+def upload_file():
+    message = ""
+    if request.method == "POST":
+        f = request.files.get("file")
+        if f:
+            filepath = os.path.join(UPLOAD_FOLDER, f.filename)
+            f.save(filepath)
+            message = f"File '{f.filename}' uploaded successfully!"
+    return render_template_string(HTML_PAGE, message=message)
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -65,14 +59,12 @@ if __name__ == "__main__":
     PORT = 8000
     local_ip = get_local_ip()
     url = f"http://{local_ip}:{PORT}"
-    print(f"AirSend Server running at {url}")
+    print(f"AirSend running at {url}")
 
-    # Show QR code
+    # Generate QR code
     qr = qrcode.QRCode(border=1)
     qr.add_data(url)
     qr.make(fit=True)
-    qr_img = qr.make_image(fill_color="black", back_color="white")
-    qr_img.show()
+    qr.make_image(fill_color="black", back_color="white").show()
 
-    server = HTTPServer(("0.0.0.0", PORT), SimpleHTTPRequestHandler)
-    server.serve_forever()
+    app.run(host="0.0.0.0", port=PORT)
